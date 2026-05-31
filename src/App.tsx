@@ -3,24 +3,29 @@ import { PromptTree } from './components/PromptTree'
 import { PromptDialog } from './components/PromptDialog'
 import { FolderDialog } from './components/FolderDialog'
 import { ImportExportPage } from './components/ImportExportPage'
+import { InstallationPage } from './components/InstallationPage'
+import { RecentPrompts } from './components/RecentPrompts'
 import { useLocalStorage } from './hooks/useLocalStorage'
 import type { Prompt, Folder, PromptLibrary } from './types'
-import { Menu, X, BookOpen, ArrowLeftRight, Download } from 'lucide-react'
+import { Menu, X, BookOpen, ArrowLeftRight, Download, MonitorDown } from 'lucide-react'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>
   readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
-type Page = 'library' | 'import-export'
+type Page = 'library' | 'import-export' | 'installation'
 
 const initialData: PromptLibrary = {
   prompts: [],
   folders: [],
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function App() {
   const [library, setLibrary] = useLocalStorage<PromptLibrary>('prompt-library', initialData)
+  const [recentPromptIds, setRecentPromptIds] = useLocalStorage<string[]>('recent-prompts', [])
   const [page, setPage] = useState<Page>('library')
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -45,11 +50,30 @@ function App() {
     if (prompt) {
       try {
         await navigator.clipboard.writeText(prompt.text)
+        setRecentPromptIds((prev) => {
+          const filtered = prev.filter((id) => id !== promptId)
+          return [promptId, ...filtered].slice(0, 5)
+        })
       } catch (err) {
         console.error('Failed to copy:', err)
       }
     }
   }
+
+  // Ensure all prompts have valid UUIDs (migration for imported/legacy data)
+  useEffect(() => {
+    const needsMigration = library.prompts.some((p) => !UUID_REGEX.test(p.id))
+    if (needsMigration) {
+      setLibrary({
+        ...library,
+        prompts: library.prompts.map((p) => ({
+          ...p,
+          id: UUID_REGEX.test(p.id) ? p.id : crypto.randomUUID(),
+        })),
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSavePrompt = (data: Partial<Prompt>) => {
     if (promptDialog.prompt) {
@@ -207,6 +231,13 @@ function App() {
                 <ArrowLeftRight className="size-4" />
                 Import &amp; Export
               </button>
+              <button
+                onClick={() => navigate('installation')}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 transition-colors ${page === 'installation' ? 'font-semibold' : ''}`}
+              >
+                <MonitorDown className="size-4" />
+                Installation
+              </button>
             </div>
           )}
         </div>
@@ -216,28 +247,39 @@ function App() {
         <main className="flex-1 overflow-auto">
           <ImportExportPage library={library} onImport={setLibrary} />
         </main>
+      ) : page === 'installation' ? (
+        <main className="flex-1 overflow-auto">
+          <InstallationPage />
+        </main>
       ) : (
-      <main className="flex-1 overflow-hidden">
-        <PromptTree
+      <main className="flex-1 overflow-hidden flex flex-col">
+        <RecentPrompts
+          recentIds={recentPromptIds}
           prompts={library.prompts}
-          folders={library.folders}
-          onCopyPrompt={handleCopyPrompt}
-          onEditPrompt={(prompt) =>
-            setPromptDialog({ open: true, prompt, folderId: prompt.folderId })
-          }
-          onDeletePrompt={handleDeletePrompt}
-          onEditFolder={(folder) =>
-            setFolderDialog({ open: true, folder, parentId: folder.parentId })
-          }
-          onDeleteFolder={handleDeleteFolder}
-          onAddPrompt={(folderId) =>
-            setPromptDialog({ open: true, folderId })
-          }
-          onAddFolder={(parentId) =>
-            setFolderDialog({ open: true, parentId })
-          }
-          onMovePrompt={handleMovePrompt}
+          onCopy={handleCopyPrompt}
         />
+        <div className="flex-1 overflow-hidden">
+          <PromptTree
+            prompts={library.prompts}
+            folders={library.folders}
+            onCopyPrompt={handleCopyPrompt}
+            onEditPrompt={(prompt) =>
+              setPromptDialog({ open: true, prompt, folderId: prompt.folderId })
+            }
+            onDeletePrompt={handleDeletePrompt}
+            onEditFolder={(folder) =>
+              setFolderDialog({ open: true, folder, parentId: folder.parentId })
+            }
+            onDeleteFolder={handleDeleteFolder}
+            onAddPrompt={(folderId) =>
+              setPromptDialog({ open: true, folderId })
+            }
+            onAddFolder={(parentId) =>
+              setFolderDialog({ open: true, parentId })
+            }
+            onMovePrompt={handleMovePrompt}
+          />
+        </div>
       </main>
       )}
       <PromptDialog
